@@ -8,6 +8,36 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
+async def send_alert(self, text: str, source_link: str):
+    url = f"{self.api_url}/sendMessage"
+    reply_markup = {
+        "inline_keyboard": [
+            [{"text": "🚀 View Original Message", "url": source_link}]
+        ]
+    }
+    payload = {
+        "chat_id": settings.admin_chat_id,
+        "text": f"🔥 New High-Value Lead Found!\n\n{text}",
+        "parse_mode": "Markdown",
+        "reply_markup": reply_markup
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, json=payload, timeout=10.0)
+            if response.status_code == 429:
+                # Если уперлись в лимит, Telegram возвращает параметр retry_after
+                retry_after = response.json().get("parameters", {}).get("retry_after", 5)
+                logger.warning(f"Rate limited. Sleeping for {retry_after} seconds...")
+                await asyncio.sleep(retry_after)
+                # Повторная попытка после паузы
+                await client.post(url, json=payload, timeout=10.0)
+            elif response.status_code != 200:
+                logger.error(f"Failed to send alert: {response.text}")
+        except Exception as e:
+            logger.error(f"Network error while sending alert: {e}")
+    await asyncio.sleep(1.2)
+
 logger = logging.getLogger("LeadMonitor")
 
 class Settings(BaseSettings):
