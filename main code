@@ -1,0 +1,128 @@
+import asyncio
+import logging
+import re
+import httpx
+from pydantic_settings import BaseSettings
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("LeadMonitor")
+
+class Settings(BaseSettings):
+    bot_token: str
+    admin_chat_id: int
+    target_channels: list[str] = ["@python_jobs", "@freelance_tg_chat"]
+    keywords: list[str] = ["python", "fastapi", "bot", "script", "automat", "parser"]
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+
+class TelegramLeadMonitor:
+    def init(self):
+        self.api_url = f"https://api.telegram.org/bot{settings.bot_token}"
+        self.offset = 0
+        self.compiled_keywords = [
+            re.compile(rf"\b{re.escape(kw)}\b", re.IGNORECASE) for kw in settings.keywords
+        ]
+
+    async def send_alert(self, text: str, source_link: str):
+        url = f"{self.api_url}/sendMessage"
+        reply_markup = {
+            "inline_keyboard": [
+                [{"text": "🚀 View Original Message", "url": source_link}]
+            ]
+        }
+        payload = {
+            "chat_id": settings.admin_chat_id,
+            "text": f"🔥 New High-Value Lead Found!\n\n{text}",
+            "parse_mode": "Markdown",
+            "reply_markup": reply_markup
+        }
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(url, json=payload, timeout=10.0)
+                if response.status_code != 200:
+                    logger.error(f"Failed to send alert: {response.text}")
+            except Exception as e:
+                logger.error(f"Network error while sending alert: {e}")
+
+    def matches_criteria(self, text: str) -> bool:
+        if not text:
+            return False
+        return any(pattern.search(text) for pattern in self.compiled_keywords)
+
+    async def poll_updates(self):
+        logger.info("Lead Monitor Service Started. Listening for opportunities...")
+        async with httpx.AsyncClient() as client:
+            while True:
+                try:
+                    url = f"{self.api_url}/getUpdates"
+                    params = {"offset": self.offset, "timeout": 30}
+                    response = await client.get(url, params=params, timeout=35.0)
+                    if response.status_code != 200:
+                        await asyncio.sleep(5)
+                        continue
+
+                    data = response.json()
+                    if not data.get("ok"):
+                        await asyncio.sleep(5)
+                        continue
+
+                    for result in data.get("result", []):
+                        self.offset = result["update_id"] + 1
+                        message = result.get("message") or result.get("channel_post") or result.get("edited_message")
+                        if not message:
+                            continue
+
+                        text = message.get("text") or message.get("caption", "")
+                        chat = message.get("chat", {})
+                        chat_username = chat.get("username")
+                        message_id = message.get("message_id")
+
+                        if not text or not chat_username:
+                            continue
+
+                        if self.matches_criteria(text):
+                            source_link = f"https://t.me/{chat_username}/{message_id}"
+                            snippet = text[:400] + "..." if len(text) > 400 else text
+                            logger.info(f"Match found in @{chat_username}! Dispatching alert...")
+                            await self.send_alert(snippet, source_link)
+
+                except asyncio.CancelledError:
+                    logger.info("Monitor shutting down gracefully...")
+                    break
+                except Exception as e:
+                    logger.error(f"Polling loop exception: {e}")
+                    await asyncio.sleep(5)
+
+                    if name == "main":
+    monitor = TelegramLeadMonitor()
+    try:
+        asyncio.run(monitor.poll_updates())
+    except KeyboardInterrupt:
+        logger.info("Service stopped by user.")
+
+
+        """
+HOW TO RUN:
+1. Install dependencies:
+   pip install httpx pydantic-settings
+
+2. Create a .env file in the same directory with your credentials:
+   BOT_TOKEN=your_telegram_bot_token_here
+   ADMIN_CHAT_ID=your_personal_telegram_chat_id
+
+3. Run the script:
+   python yourfilename.py
+"""
+
+
+==========================================================================================================================================================================================================================================================================================================================================================
+#If you need to: customize/upgrade/integrate or just dont wanna to set it by yourself, then just text me.
+#Telegram for work: @Myhamed91
+==========================================================================================================================================================================================================================================================================================================================================================
